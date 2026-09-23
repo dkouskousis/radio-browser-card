@@ -1,5 +1,5 @@
 const STORAGE_KEY = "radio_browser_card_v1";
-const ROOT_ID = "media-source://radio_browser/";
+const ROOT_ID = "media-source://radio_browser";
 
 const STRINGS = {
   en: {
@@ -268,7 +268,7 @@ class RadioBrowserCard extends HTMLElement {
     this._tab = "results"; this._busy = true; this._renderList(); this._status("");
     try {
       const data = await this._hass.callWS({ type: "media_source/search_media", media_content_id: ROOT_ID, search_query: query });
-      if (request === this._request) this._results = data.result.filter((s) => s.can_play && s.media_content_id?.startsWith(ROOT_ID));
+      if (request === this._request) this._results = data.result.filter((s) => s.can_play && s.media_content_id?.startsWith(`${ROOT_ID}/`));
     } catch (error) { if (request === this._request) this._status(`${this._t("browseError")}: ${error.message}`, true); }
     finally { if (request === this._request) { this._busy = false; this._renderList(); } }
   }
@@ -276,8 +276,8 @@ class RadioBrowserCard extends HTMLElement {
   async _loadPopular() {
     this._busy = true; this._renderList(); this._status("");
     try {
-      const data = await this._hass.callWS({ type: "media_source/browse_media", media_content_id: `${ROOT_ID}popular` });
-      this._popular = (data.children || []).filter((s) => s.can_play && s.media_content_id?.startsWith(ROOT_ID));
+      const data = await this._hass.callWS({ type: "media_source/browse_media", media_content_id: `${ROOT_ID}/popular` });
+      this._popular = (data.children || []).filter((s) => s.can_play && s.media_content_id?.startsWith(`${ROOT_ID}/`));
     } catch (error) { this._status(`${this._t("browseError")}: ${error.message}`, true); }
     finally { this._busy = false; this._renderList(); }
   }
