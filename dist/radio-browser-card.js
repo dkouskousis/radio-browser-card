@@ -110,6 +110,7 @@ class RadioBrowserCard extends HTMLElement {
   }
 
   _renderShell() {
+    this._playersSignature = "";
     this.shadowRoot.innerHTML = `<style>${STYLE}</style><ha-card>
       <div class="header"><h2 class="title"></h2></div>
       <label class="device-label" for="player"></label><select id="player"></select>
