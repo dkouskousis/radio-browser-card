@@ -4,7 +4,7 @@ A Home Assistant dashboard card for the built-in **Radio Browser** media source.
 
 ## Requirements
 
-- A recent Home Assistant release with `media_source/search_media` support (tested against the Home Assistant frontend and core APIs available in September 2026).
+- A recent Home Assistant release with `media_source/search_media` support (the card uses the Home Assistant frontend and core APIs available in September 2026).
 - [Radio Browser](https://www.home-assistant.io/integrations/radio_browser/) installed in Settings → Devices & services.
 - At least one media player that supports `media_player.play_media` and Radio Browser media sources.
 
@@ -39,5 +39,7 @@ If a station cannot play, first try it in **Media → Radio Browser** on the sam
 ## Development
 
 The release file is `dist/radio-browser-card.js`. It is plain JavaScript with no build step or external runtime dependencies. Run `node --check dist/radio-browser-card.js` for a syntax check.
+
+The card's API calls have been checked with a local mock. It has not yet been run against a live Home Assistant instance.
 
 MIT license.
