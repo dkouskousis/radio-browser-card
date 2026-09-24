@@ -31,7 +31,7 @@ Use `/hacsfiles/radio-browser-card/radio-browser-card.js` exactly as written: **
 
 - Search and Popular stations come from Home Assistant's Radio Browser media source, not a third-party API called from your browser.
 - Favorites and the last selected player are stored in Home Assistant's **per-user frontend storage**. The same HA account sees the same favorites on mobile and desktop; other HA accounts have their own favorites. Open cards update when another device using the same account makes a change.
-- In the Favorites tab, use the ▲ and ▼ buttons to change station order. The order is saved for your HA account and works on mobile and desktop.
+- In the Favorites tab, tap **Reorder** (↕) to show the ▲ and ▼ controls. Tap **Done** when finished. The order is saved for your HA account and works on mobile and desktop.
 - The card sends `media_player.play_media` with `media-source://radio_browser/<station UUID>` and the station's media type. Radio Browser resolves the stream when you play it.
 - The card remembers the last Radio Browser station started on each player and shows its name while that player is active. If the player reports a different media content ID, the remembered station is cleared.
 - If the player's Home Assistant entity exposes `media_title` and/or `media_artist`, the card displays them separately as track/stream information. Some players do not expose embedded radio stream metadata to Home Assistant, even when the stream carries it; the card does not fetch raw audio stream metadata itself.
