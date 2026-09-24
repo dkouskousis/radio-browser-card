@@ -13,6 +13,7 @@ const STRINGS = {
     playError: "Could not play this station", browseError: "Could not load stations",
     current: "Now playing", station: "Station", track: "Track / stream info",
     moveUp: "Move up", moveDown: "Move down",
+    sort: "↕ Reorder", done: "✓ Done",
     retry: "Try again", loadingStorage: "Loading favorites…",
   },
   el: {
@@ -26,6 +27,7 @@ const STRINGS = {
     playError: "Δεν ξεκίνησε ο σταθμός", browseError: "Δεν φορτώθηκαν οι σταθμοί",
     current: "Παίζει τώρα", station: "Σταθμός", track: "Τραγούδι / πληροφορίες ροής",
     moveUp: "Μετακίνηση πάνω", moveDown: "Μετακίνηση κάτω",
+    sort: "↕ Σειρά", done: "✓ Τέλος",
     retry: "Προσπάθησε ξανά", loadingStorage: "Φόρτωση αγαπημένων…",
   },
 };
@@ -48,6 +50,9 @@ const STYLE = `
   .tabs { display:flex; gap:6px; border-bottom:1px solid var(--divider-color, #ddd); margin-bottom:8px; }
   .tab { background:none; color:var(--secondary-text-color); padding:10px 12px; border-bottom:2px solid transparent; }
   .tab.active { color:var(--primary-color); border-color:var(--primary-color); }
+  .sort-toggle { margin-left:auto; align-self:center; padding:6px 9px; border-radius:9px; background:var(--secondary-background-color, #eee); color:var(--primary-text-color); font-size:12px; white-space:nowrap; }
+  .sort-toggle.active { color:var(--text-primary-color, white); background:var(--primary-color); }
+  .sort-toggle[hidden] { display:none; }
   .station { display:flex; align-items:center; gap:12px; padding:9px 2px; border-bottom:1px solid var(--divider-color, #ddd); }
   .station:last-child { border-bottom:0; }
   .logo { width:42px; height:42px; flex:none; border-radius:8px; object-fit:contain; background:var(--secondary-background-color, #eee); }
@@ -79,6 +84,7 @@ class RadioBrowserCard extends HTMLElement {
     this._config = {};
     this._data = { favorites: [], player: "", stations: {} };
     this._tab = "favorites";
+    this._sorting = false;
     this._results = [];
     this._request = 0;
     this._loaded = false;
@@ -125,7 +131,7 @@ class RadioBrowserCard extends HTMLElement {
       <div class="header"><h2 class="title"></h2></div>
       <label class="device-label" for="player"></label><select id="player"></select>
       <form class="search"><input type="search" required minlength="2"><button type="submit" class="primary search-button"></button></form>
-      <nav class="tabs"><button type="button" class="tab favorites-tab" data-tab="favorites"></button><button type="button" class="tab popular-tab" data-tab="popular"></button><button type="button" class="tab results-tab" data-tab="results" hidden></button></nav>
+      <nav class="tabs"><button type="button" class="tab favorites-tab" data-tab="favorites"></button><button type="button" class="tab popular-tab" data-tab="popular"></button><button type="button" class="tab results-tab" data-tab="results" hidden></button><button type="button" class="sort-toggle" hidden></button></nav>
       <div class="list" aria-live="polite"></div><div class="player"></div><div class="status" role="status"></div>
     </ha-card>`;
     this.shadowRoot.querySelector("#player").addEventListener("change", async (event) => {
@@ -139,9 +145,14 @@ class RadioBrowserCard extends HTMLElement {
     });
     this.shadowRoot.querySelectorAll("[data-tab]").forEach((button) => button.addEventListener("click", () => {
       this._tab = button.dataset.tab;
+      this._sorting = false;
       this._renderList();
       if (this._tab === "popular" && !this._popular) this._loadPopular();
     }));
+    this.shadowRoot.querySelector(".sort-toggle").addEventListener("click", () => {
+      this._sorting = !this._sorting;
+      this._renderList();
+    });
   }
 
   _renderAll() {
@@ -238,11 +249,17 @@ class RadioBrowserCard extends HTMLElement {
   _renderList() {
     const list = this.shadowRoot.querySelector(".list");
     if (!list) return;
+    if (this._data.favorites.length < 2) this._sorting = false;
     this.shadowRoot.querySelectorAll("[data-tab]").forEach((button) => {
       button.classList.toggle("active", button.dataset.tab === this._tab);
       button.setAttribute("aria-pressed", String(button.dataset.tab === this._tab));
     });
     this.shadowRoot.querySelector(".results-tab").hidden = this._tab !== "results";
+    const sortToggle = this.shadowRoot.querySelector(".sort-toggle");
+    sortToggle.hidden = this._tab !== "favorites" || this._data.favorites.length < 2;
+    sortToggle.textContent = this._t(this._sorting ? "done" : "sort");
+    sortToggle.classList.toggle("active", this._sorting);
+    sortToggle.setAttribute("aria-pressed", String(this._sorting));
     list.replaceChildren();
     const items = this._tab === "favorites" ? this._data.favorites : this._tab === "popular" ? (this._popular || []) : this._results;
     if (!items.length || this._busy) {
@@ -266,7 +283,7 @@ class RadioBrowserCard extends HTMLElement {
       play.textContent = "▶"; play.title = this._t("play"); play.setAttribute("aria-label", `${this._t("play")}: ${station.title}`);
       play.addEventListener("click", () => this._play(station));
       row.append(logo, name);
-      if (this._tab === "favorites" && items.length > 1) {
+      if (this._tab === "favorites" && this._sorting && items.length > 1) {
         const reorder = document.createElement("div"); reorder.className = "reorder";
         for (const [direction, label, symbol] of [[-1, "moveUp", "▲"], [1, "moveDown", "▼"]]) {
           const button = document.createElement("button"); button.type = "button"; button.className = "icon";
@@ -277,7 +294,8 @@ class RadioBrowserCard extends HTMLElement {
         }
         row.append(reorder);
       }
-      row.append(fav, play); list.append(row);
+      if (!this._sorting || this._tab !== "favorites") row.append(fav, play);
+      list.append(row);
     }
   }
 
@@ -332,7 +350,7 @@ class RadioBrowserCard extends HTMLElement {
   async _search(query) {
     if (query.length < 2) return;
     const request = ++this._request;
-    this._tab = "results"; this._busy = true; this._renderList(); this._status("");
+    this._tab = "results"; this._sorting = false; this._busy = true; this._renderList(); this._status("");
     try {
       const data = await this._hass.callWS({ type: "media_source/search_media", media_content_id: ROOT_ID, search_query: query });
       if (request === this._request) this._results = data.result.filter((s) => s.can_play && s.media_content_id?.startsWith(`${ROOT_ID}/`));
