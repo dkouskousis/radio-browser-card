@@ -12,6 +12,7 @@ const STRINGS = {
     selectPlayer: "Select a player first.", favoriteError: "Could not save favorites",
     playError: "Could not play this station", browseError: "Could not load stations",
     current: "Now playing", station: "Station", track: "Track / stream info",
+    moveUp: "Move up", moveDown: "Move down",
     retry: "Try again", loadingStorage: "Loading favorites…",
   },
   el: {
@@ -24,6 +25,7 @@ const STRINGS = {
     selectPlayer: "Επίλεξε πρώτα συσκευή.", favoriteError: "Δεν αποθηκεύτηκαν τα αγαπημένα",
     playError: "Δεν ξεκίνησε ο σταθμός", browseError: "Δεν φορτώθηκαν οι σταθμοί",
     current: "Παίζει τώρα", station: "Σταθμός", track: "Τραγούδι / πληροφορίες ροής",
+    moveUp: "Μετακίνηση πάνω", moveDown: "Μετακίνηση κάτω",
     retry: "Προσπάθησε ξανά", loadingStorage: "Φόρτωση αγαπημένων…",
   },
 };
@@ -53,6 +55,8 @@ const STYLE = `
   .name { flex:1; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; font-weight:500; }
   .icon { background:transparent; color:var(--primary-text-color); padding:7px; font-size:22px; line-height:1; border-radius:8px; }
   .icon.starred { color:var(--warning-color, #e6a900); }
+  .reorder { display:flex; flex-direction:column; flex:none; }
+  .reorder .icon { font-size:15px; padding:4px 8px; }
   .icon:hover, .tab:hover { background:var(--secondary-background-color, #eee); }
   .message { padding:17px 4px; color:var(--secondary-text-color); font-size:14px; }
   .error { color:var(--error-color, #c33); }
@@ -79,6 +83,7 @@ class RadioBrowserCard extends HTMLElement {
     this._request = 0;
     this._loaded = false;
     this._connection = null;
+    this._saveQueue = Promise.resolve();
   }
 
   setConfig(config) {
@@ -245,7 +250,7 @@ class RadioBrowserCard extends HTMLElement {
       message.textContent = this._busy ? this._t("loading") : this._tab === "favorites" ? (this._loaded ? this._t("empty") : this._t("loadingStorage")) : this._t("noResults");
       list.append(message); return;
     }
-    for (const station of items) {
+    for (const [index, station] of items.entries()) {
       const row = document.createElement("div"); row.className = "station";
       const logo = station.thumbnail && /^https?:\/\//i.test(station.thumbnail) ? document.createElement("img") : document.createElement("span");
       logo.className = "logo" + (logo.tagName === "SPAN" ? " fallback-logo" : "");
@@ -260,7 +265,19 @@ class RadioBrowserCard extends HTMLElement {
       const play = document.createElement("button"); play.type = "button"; play.className = "icon";
       play.textContent = "▶"; play.title = this._t("play"); play.setAttribute("aria-label", `${this._t("play")}: ${station.title}`);
       play.addEventListener("click", () => this._play(station));
-      row.append(logo, name, fav, play); list.append(row);
+      row.append(logo, name);
+      if (this._tab === "favorites" && items.length > 1) {
+        const reorder = document.createElement("div"); reorder.className = "reorder";
+        for (const [direction, label, symbol] of [[-1, "moveUp", "▲"], [1, "moveDown", "▼"]]) {
+          const button = document.createElement("button"); button.type = "button"; button.className = "icon";
+          button.textContent = symbol; button.disabled = index + direction < 0 || index + direction >= items.length;
+          button.setAttribute("aria-label", `${this._t(label)}: ${station.title}`);
+          button.addEventListener("click", () => this._moveFavorite(station.media_content_id, direction));
+          reorder.append(button);
+        }
+        row.append(reorder);
+      }
+      row.append(fav, play); list.append(row);
     }
   }
 
@@ -285,8 +302,11 @@ class RadioBrowserCard extends HTMLElement {
   }
 
   async _save() {
-    try { await this._hass.callWS({ type: "frontend/set_user_data", key: STORAGE_KEY, value: this._data }); }
-    catch (error) { this._status(`${this._t("favoriteError")}: ${error.message}`, true); }
+    const value = JSON.parse(JSON.stringify(this._data));
+    this._saveQueue = this._saveQueue.then(() => this._hass.callWS({
+      type: "frontend/set_user_data", key: STORAGE_KEY, value,
+    })).catch((error) => this._status(`${this._t("favoriteError")}: ${error.message}`, true));
+    await this._saveQueue;
   }
 
   async _toggleFavorite(station) {
@@ -295,6 +315,16 @@ class RadioBrowserCard extends HTMLElement {
       ? old.filter((s) => s.media_content_id !== station.media_content_id)
       : [...old, { title: station.title, media_content_id: station.media_content_id,
         media_content_type: station.media_content_type, thumbnail: station.thumbnail || "" }];
+    this._renderList();
+    await this._save();
+  }
+
+  async _moveFavorite(id, direction) {
+    const favorites = this._data.favorites;
+    const index = favorites.findIndex((station) => station.media_content_id === id);
+    const next = index + direction;
+    if (index < 0 || next < 0 || next >= favorites.length) return;
+    [favorites[index], favorites[next]] = [favorites[next], favorites[index]];
     this._renderList();
     await this._save();
   }
