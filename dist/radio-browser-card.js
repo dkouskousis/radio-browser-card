@@ -11,7 +11,8 @@ const STRINGS = {
     searchButton: "Search", searching: "Searching…", loading: "Loading…",
     selectPlayer: "Select a player first.", favoriteError: "Could not save favorites",
     playError: "Could not play this station", browseError: "Could not load stations",
-    current: "Now playing", retry: "Try again", loadingStorage: "Loading favorites…",
+    current: "Now playing", station: "Station", track: "Track / stream info",
+    retry: "Try again", loadingStorage: "Loading favorites…",
   },
   el: {
     device: "Αναπαραγωγή σε", choose: "Επίλεξε συσκευή", search: "Αναζήτηση σταθμών",
@@ -22,7 +23,8 @@ const STRINGS = {
     searchButton: "Αναζήτηση", searching: "Αναζήτηση…", loading: "Φόρτωση…",
     selectPlayer: "Επίλεξε πρώτα συσκευή.", favoriteError: "Δεν αποθηκεύτηκαν τα αγαπημένα",
     playError: "Δεν ξεκίνησε ο σταθμός", browseError: "Δεν φορτώθηκαν οι σταθμοί",
-    current: "Παίζει τώρα", retry: "Προσπάθησε ξανά", loadingStorage: "Φόρτωση αγαπημένων…",
+    current: "Παίζει τώρα", station: "Σταθμός", track: "Τραγούδι / πληροφορίες ροής",
+    retry: "Προσπάθησε ξανά", loadingStorage: "Φόρτωση αγαπημένων…",
   },
 };
 
@@ -57,6 +59,9 @@ const STYLE = `
   .player { border-radius:12px; background:var(--secondary-background-color, #eee); padding:14px; }
   .player-row { display:flex; align-items:center; justify-content:space-between; gap:10px; }
   .playing-title { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; font-weight:600; }
+  .playing-track { margin-top:9px; min-width:0; }
+  .playing-track .eyebrow { margin-bottom:3px; }
+  .playing-track .name { display:block; }
   .player button { flex:none; }
   .volume { display:flex; gap:12px; align-items:center; font-size:13px; margin-top:10px; }
   .volume input { flex:1; accent-color:var(--primary-color); }
@@ -68,7 +73,7 @@ class RadioBrowserCard extends HTMLElement {
     super();
     this.attachShadow({ mode: "open" });
     this._config = {};
-    this._data = { favorites: [], player: "" };
+    this._data = { favorites: [], player: "", stations: {} };
     this._tab = "favorites";
     this._results = [];
     this._request = 0;
@@ -174,17 +179,46 @@ class RadioBrowserCard extends HTMLElement {
     const entity = this._hass.states[this._data.player];
     if (!entity) { container.hidden = true; return; }
     container.hidden = false;
+    const active = ["playing", "paused", "buffering"].includes(entity.state);
+    let station = active ? this._data.stations?.[this._data.player] : null;
+    const attrs = entity.attributes;
+    if (station && attrs.media_content_id && station.stream_id && station.stream_id !== attrs.media_content_id) {
+      delete this._data.stations[this._data.player];
+      station = null;
+      this._save();
+    } else if (station && attrs.media_content_id && !station.stream_id && Date.parse(entity.last_updated) >= station.started_at) {
+      station.stream_id = attrs.media_content_id;
+      this._save();
+    }
     const row = document.createElement("div"); row.className = "player-row";
     const text = document.createElement("div"); text.style.minWidth = "0";
     const eyebrow = document.createElement("p"); eyebrow.className = "eyebrow";
-    eyebrow.textContent = `${this._t("current")} · ${entity.state}`;
+    eyebrow.textContent = `${station ? this._t("station") : this._t("current")} · ${entity.state}`;
     const title = document.createElement("div"); title.className = "playing-title";
-    title.textContent = entity.attributes.media_title || entity.attributes.app_name || entity.attributes.friendly_name || this._t("stopped");
+    title.textContent = station?.title || (active ? attrs.media_channel || attrs.media_title || attrs.friendly_name : this._t("stopped"));
     text.append(eyebrow, title);
     const stop = document.createElement("button"); stop.className = "primary";
-    stop.textContent = this._t("stop"); stop.disabled = !["playing", "paused", "buffering"].includes(entity.state);
-    stop.addEventListener("click", () => this._call("media_stop", { entity_id: this._data.player }));
+    stop.textContent = this._t("stop"); stop.disabled = !active;
+    stop.addEventListener("click", async () => {
+      if (await this._call("media_stop", { entity_id: this._data.player })) {
+        delete this._data.stations[this._data.player];
+        this._renderNowPlaying();
+        await this._save();
+      }
+    });
     row.append(text, stop); container.append(row);
+    const mediaTitle = attrs.media_title?.trim();
+    const mediaArtist = attrs.media_artist?.trim();
+    const isStationTitle = station && mediaTitle?.toLocaleLowerCase() === station.title.toLocaleLowerCase();
+    const isGenericTitle = mediaTitle?.toLocaleLowerCase() === "default media receiver";
+    if (active && (!station || Date.parse(entity.last_updated) >= station.started_at) &&
+        (mediaArtist || (mediaTitle && !isStationTitle && !isGenericTitle && mediaTitle !== attrs.app_name))) {
+      const info = document.createElement("div"); info.className = "playing-track";
+      const caption = document.createElement("p"); caption.className = "eyebrow"; caption.textContent = this._t("track");
+      const details = document.createElement("span"); details.className = "name";
+      details.textContent = [mediaArtist, !isStationTitle && !isGenericTitle ? mediaTitle : ""].filter(Boolean).join(" — ");
+      info.append(caption, details); container.append(info);
+    }
     if (typeof entity.attributes.volume_level === "number") {
       const wrap = document.createElement("label"); wrap.className = "volume";
       const caption = document.createElement("span"); caption.textContent = this._t("volume");
@@ -239,7 +273,10 @@ class RadioBrowserCard extends HTMLElement {
       this._unsubscribe = await this._connection.subscribeMessage((event) => {
         const value = event.value;
         if (value && Array.isArray(value.favorites)) {
-          this._data = { favorites: value.favorites.filter((s) => typeof s.media_content_id === "string"), player: value.player || "" };
+          this._data = {
+            favorites: value.favorites.filter((s) => typeof s.media_content_id === "string"),
+            player: value.player || "", stations: value.stations && typeof value.stations === "object" ? value.stations : {},
+          };
         }
         this._loaded = true;
         this._renderPlayerPicker(); this._renderNowPlaying(); this._renderList();
@@ -287,18 +324,24 @@ class RadioBrowserCard extends HTMLElement {
       this._status(this._t("selectPlayer"), true); return;
     }
     this._status("");
+    const startedAt = Date.now();
     try {
       await this._hass.callService("media_player", "play_media", {
         entity_id: this._data.player,
         media_content_id: station.media_content_id,
         media_content_type: station.media_content_type,
       });
+      this._data.stations[this._data.player] = {
+        title: station.title, media_content_id: station.media_content_id, started_at: startedAt,
+      };
+      this._renderNowPlaying();
+      await this._save();
     } catch (error) { this._status(`${this._t("playError")}: ${error.message}`, true); }
   }
 
   async _call(service, data) {
-    try { await this._hass.callService("media_player", service, data); }
-    catch (error) { this._status(error.message, true); }
+    try { await this._hass.callService("media_player", service, data); return true; }
+    catch (error) { this._status(error.message, true); return false; }
   }
 
   _status(message, error = false) {
